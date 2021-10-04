@@ -110,7 +110,7 @@ object MovieSimilarities {
     // Filter out duplicate pairs
     val uniqueJoinedRatings = joinedRatings.filter(filterDuplicates)
 
-    // Now key by (movie1, movie2) pairs.
+    // Now key by (movie1, movie2) pairs
     val moviePairs = uniqueJoinedRatings.map(makePairs)
 
     // We now have (movie1, movie2) => (rating1, rating2)
@@ -120,8 +120,9 @@ object MovieSimilarities {
     // We now have (movie1, movie2) = > (rating1, rating2), (rating1, rating2) ...
     // Can now compute similarities.
     val moviePairSimilarities = moviePairRatings.mapValues(computeCosineSimilarity).cache()
-    
-    //Save the results if desired
+    //this gives movie pair -> (similarity score, number of such pairs found)
+    //Save the results if desired in cache since you might get more than one time
+    //query to find similarity of particular movies
     //val sorted = moviePairSimilarities.sortByKey()
     //sorted.saveAsTextFile("movie-sims")
     
@@ -129,7 +130,7 @@ object MovieSimilarities {
     
     if (args.length > 0) {
       val scoreThreshold = 0.97
-      val coOccurenceThreshold = 50.0
+      val coOccurenceThreshold = 50.0 //atleast 50 pairs so we consider only meaningful ones
       
       val movieID:Int = args(0).toInt
       
