@@ -1,0 +1,275 @@
+Spark course 
+
+
+The spark is dependent on particular version of hadoop, scala needs jdk => install spark + set the env variables telling JAVA_HOME and HADOOP_HOME, SPARK_HOME which the tells the path where to find hadoop, spark and jdk that we installed.   Also some people say that spark is faster than hadoop. Nope. Spark is faster than map reduce. Hadoop is a technology having lot of components like HDFS, yarn etc which spark can use. It is the map reduce part that gets changed to spark which is what is the difference between the hadoop and spark really. 
+ Spark is framework which can run using hadoop (yarn) and also on mesos, kubernetes independently without need for hadoop or any of it component.  Hadoop is framework having MapR technology and other components like HDFS, etc. Note that map-reduce jobs i.e. mapper reducer and MapR technology are different things. Both MapR technology and spark technology has mapper reduce jobs concept. Spark does not use MAPR technology of hadoop. Spark internally might use some MAPR technology concepts but spark is advanced version and a different technology than map reduce technology.
+
+Yarn can manager not just map reduce job. Yarn can use it to manage web services too, streaming jobs, etc. 
+
+In windows, we install winutils which tricks the spark as if the hadoop is installed which is what spark is dependent on => in hadoop home, we give the path of winutils 
+
+Also, path env variables must be there => add the bin paths of both spark folder, jdk so that we can directly access executables from these folder from command line 
+
+https://sundog-education.com/spark-scala/ => for installations 
+
+
+You can go to spark conf folder and there are templates => just remove the templace from filename and it will be picked => for example, to not see info level logs, in log4j.properties => root level logging can be changed to error and template extension is removed 
+
+We have a spark shell as executable where you can execute some spark 
+
+We are not taking very big data because we are running on local computer and also just to mention, on local computer whatever program we are writing for this much data, this could have been done without spark with almost same performance. But since we are simulating, leave that. 
+
+You can see the the spark Folder contents :  It has the spark core lib jar and other sparks jars=> the one which you can use in IDEA => It has all the spark classes that are needed to code the spark program
+It has find-spark-home which might be used to find spark home env 
+It has scripts to start spark shell and others   We have lib dependency of spark core which is must to code the spark program. 
+
+Spark particular version supports a particular version of scala which you can find in release notes of spark version you are using.
+
+In spark context, we can tell it to run on local machine or what type of cluster it has to run on and the number of core max => * means to use all the cores on local machine and thus this might actually be running parallel on cores of local computer. Spark context is created in driver script and in spark shell, you get that already created for you. 
+
+In our spark program, we tell the spark context to do the work because, spark is not running now. When it runs, it will have it’s context on one of the core => we tell that context which will come alive when spark runs, to execute this.
+
+In hadoop 1, we have MR tasks, HDFS etc. In hadoop 2, we have yarn which is resource manager and has deployed node managers on every node. We can then have spark or Map reduce i.e. anything we want. Actually yarn provides application master interface. If you are using spark, spark will implement this interface and that interface is called spark application master. If you are using Mapr, it will implement this interface and it is called the mapr application master. Now yarn talks with respective application master to understand the resource requirement which is shared with resource manager on the master node and then with node manager on the slave nodes. 
+ Actually, though HDFS looks like a file system, it is distributed internally among all nodes. All nodes can access any HDFS location. Similar to architecture of yarn in hadoop 2, in hadoop 1, we have namenode on the master node and datanodes on the slaves. The name node contacts with all the datanodes to store the data in distributed manner and ask for it whenever needed.  Namenode is like resource manager of yarn and datanodes are like node manager of yarn.  Yarn however talks to multiple application master of different applications you are running in parallel on yarn. 
+Thus in many of refresh jobs, which are hadoop 1 jobs, we can see the map reduce UI. In case of spark job, we can see the spark UI. 
+
+___________________________________________________________________________________________________________________________
+
+
+Spark 3 Features :   1. Mlib library old one is deprecated and new Mlib based on dataframes is added. 
+2. 17 times faster => Adaptive execution and Dynamic partition pruning. 
+3. No deep learning capabilities but now you can expose your GPU hardware from the cluster nodes => You can use external projects like MML spark or tensorflow spark which are deep learning ones and which can use this GPU to accelerate the deep learning. 
+4. Binary data support.
+5. Spark graph => cypher query language like SQL for graph data structures (social networking graph). (coming from morpheus and cipher for spark which were external projects)
+
+————————————————————————————————————————————
+
+Spark => Fast and General (since lot of ML, graph etc) way to large scala data processing. Provides a framework to write distributed system program => Import datasets from distributed source like HDFS, S3 => perform actions like transformation, etc => on the cluster of computers which is horizontal scaling 
+ Architecture 
+
+1. All the programs that we write are driver programs which are built around the spark context which encapsulates the underlying hardware (the whole cluster) on which you are running this.
+2. Now on top of this spark context, we have a cluster manager, we can choose yarn or spark itself provides one or Mesos. This is responsible for distributing the total work defined by driver script among multiple nodes. It can split the data into chunks and send to executors. Executors are given list of tasks from the work, has their own cache. You cluster manager then figures out how to combine those result data into one and pass it for next steps if any.
+3. For each application, there is a separate application master in case multiple spark applications have been submitted. 
+Comparison with Hadoop 
+
+Hadoop was first tech for distributed data processing on cluster for large data. Spark is 100 times faster than it and has more extra capabilities in built. 
+
+Speed  
+
+Spark is faster :
+1. Because its in memory computations.
+2. Spark used DAG graph => In spark, nothing actually happens until you submit the command => it goes back to list of actions of code and resolve that to most optimal way to get to result. 
+
+RDD 
+
+Resilient Distributed dataset => Abstraction over giant data which is distributed but you get RDD as if they are one dataset => and you perform your actions like transformations on top of them without worrying how that action will be performed on distributed data behind this abstraction.  Resilient means able to recover fast i.e. fault tolerance => if one node goes down, it is able to recover fast from that by giving that work to some other node by getting the data from distributed storage again.   Creation :   1. From a data source like HDFS, S3, Hive which is database type distributed storage, Elasticsearch, 		JSON, JDBC etc. 
+2. It is provided by driver script using it’s spark context.   Transformations : map, flatmap, filter, distinct, sample (for testing, take sample of large dataset), union, intersection, subtract, cartesian  Note : Filter should be used more so that all the unnecessary data gets filtered and faster it will be.
+
+Actions: Nothing actually happens in spark until there is an action at the end which acts like terminal of chain. So it might create problems in debugging because, map might not do anything in driver script debugging as it is not executed => this is called lazy evaluation to generate the DAG until the action happens.
+
+collect (just execute all transformations above on cluster and get result on driver script to maybe print)
+count (all rows), take(you want first 10 rows)
+reduceByKey (for all kv pairs, collect all values as array for each key and get (a,b) where a,b are the values you can add etc)
+
+
+Libraries
+
+Spark Streaming => Forever running stream which keeps takingthe inout data maybe from server and processing them using spark and outputs them. It’s real time type thing.
+Spark SQL => Performing SQL queries on large scale distributed data. The data is stored as database in sql. 
+ML Lib
+Graph 
+
+
+Working of spark 
+
+If we take count by value example => map is pretty simple to distribute since it is 1:1 mapping but what about count By value => For a given value, it has the find the count of it across different machines in the cluster => So when writing spark query, we need to be careful about how to write such that this shuffling of data happens less. 
+
+1. Spark creates stages => The job is broken in stages based on when data needs to be reorganized => So, reading from text file and then many map operations maybe sequential can be taken as one stage. The shuffling then could be next stage and then map again can be 3rd stage. So, stage is like one processing unit that can be processed parallely in one go.
+2. Tasks => Stages are broken into the the tasks. These tasks are the actually breaking of data amongst the machines. Each task has only some chunk of data. Each task can be processed parallely and independently.
+3. Cluster manager is responsible for making, distributing and collecting the tasks results. 
+
+Advanced Concepts
+
+If we have something like pre-computation or movied id to name fixed type map, we can => 
+
+1. Have it loaded in driver script as RDD => since driver script goes on every executor, every executor can access this pre-computed stuff.
+2. Let spark automatically forward the data to executor whenever required => but here, same executor can ask for it multiple times.
+3. If data is big, we would want to send it to all executors once in begining => Using broadcast variable => Broadcast variable is final and can’t be updated.   var dictName = sc.broadcast(mapOfNameandIds) movies.map(movie => (dictName.value(movie.id)))
+ => The dictname is the broadcasted variable on all the executors and .value is used to get the broadcast variable as stored i.e. a hashmap of movie id and names in this case 
+https://spoddutur.github.io/spark-notes/rebroadcast_a_broadcast_variable.html
+
+
+Spark Accumulator => 
+Allows many executors to increment a shared variable 
+
+.cache() or .persist() on RDD =>
+So, you might be making a RDD with a chain of transformation functions on it but then you do some action and this is when it gets DAG build up and actually run. But let say, whatever you had before this action, you want to perform some other action on it again => spark will actually rebuild the DAG and everything => cache saves that in memory for reuse and persist saves that in disk for reuse (you might want to save in disk if you want to make it fault tolerant in case the nodes goes down) 
+
+Code Explanation
+
+val sc = new SparkContext(“local[*]”, “RatingCounter”) => local means we are running on local machine and use it’s all cores(*) => The second parameter is just the label so that in spark UI, we can identify this job amongst many other jobs.
+
+If you specify local like this in code, even if you run on cluster, it will run just on the master node which is local because explicitly mentioning the local overrides any configuration that might have been given on the cluster itself. 
+
+SPARK TESTS => So, before running any test in spark, remember tests creates a Spark session, and then run the test and when the test completes the session is killed => Thus we can’t access the things out of the session. 
+
+
+Running Spark
+
+1. So, we can run the spark program in the IDEA where the sbt compiles the spark scala dependency that we have added and our spark program makes use of those spark internal files to run the code and give results
+2. We can run our program by packaging our package i.e. our project code and creating a jar. Then we can use the spark submit command and mention the class arguments, this jar, the class we want to run inside the jar etc to run our spark program. When you are running using spark-submit it uses the built in spark cluster manager 
+3. Running on actual cluster => we will do same technique as 2 i.e. the spark submit will be available which we will use to submit the spark app and yarn or inbuilt spark cluster manager will take care of it like distributing and all. 
+
+SPARK SUBMIT  =>  BENEFITS:  Command line way => This way you can also put cron jobs and automate the submissions of the jobs.
+Also, since we are using the jar which is java bytecode, we can run it on any machine i.e. whether linux cluster or windows cluster, it will run just fine.  
+OPTIONS:   —jars option to specify other jar dependencies your code might need like kafka etc  => or you can do sbt package which will package 3rd party libs your code needs along with the jar and you don’t need to use this to supply them like this => These jars and files should be reasonable size so they can be made available to the cluster. These will be in s3 but nodes will download these and thus if the size is much bigger than the disk size of the node, it can be a problem. 
+—files option to specify any other files that your program might be needing  
+—master option to specify what will be the master. If you don’t mention it in your driver script, not in your command, there is way to give it through spark configuration file. So, value will be yarn in case of hadoop based spark cluster, hostname:port of the master node in case of using built in spark cluster manager 
+Example: —master yarn client
+
+—num-executors => 2 by default, based on resources you have
+
+—executor-memory => Don’t give memory to executor more than what you have. Remember that some memory will be used by system also. 
+
+—total-executor-cores => How many cores to be given to each executor which is running set of tasks 
+
+Note: Some of these options can be mentioned in the driver script and spark configuration file also. The priority is driver script > command line option > spark config file 
+
+About spark submit:
+
+1. No local paths to jar or files => paths must be which is accessible to all the nodes on the cluster + it should be of file/jar stored in distributed file system like s3, HDFS, etc.
+2. Spark submit happens on the master node. 
+3. The spark submit along with the cluster manager decides how to distribute the driver script, the RDD which are distributable into all the nodes on the cluster. 
+
+
+DISTRIBUTING WORK AFTER SPARK SUBMIT
+
+1. The driver script or spark driver is the program that you have written and it runs on the master node. It creates, spark context, connects with the master node it is running on and contacts the cluster manager for any kind of work that needs to be done => the kind of works are of 3 types mainly => mappers, reducers, partitioning/shuffling => so, driver creates the tasks out of the these works and gives to cluster manager which in turn gives them to executors or workers. So cluster manager is responsible for handling the node failures and give back the results back to driver. 
+
+https://blog.knoldus.com/understanding-the-working-of-spark-driver-and-executor
+
+PARTITIONING 
+ So, the spark is not intelligent sometimes. We know that spark break the work in DAG stages based on how shuffling is required. If there is groupByKey, reduceByKey, join, lookup etc type of operations. These are expensive as they require the complete data. Spark does not break them into tasks like it does for map operations stages easily. So, it is actually using just one core and not using other cores and defeating the purpose of parallel processing. So, in this case, we explicitly mention for spark to partition the data while doing any of these operation like join, groupBy.   Before doing groupBy or join => let say we have a map operation, then we can do =>  val abc = map(mapFunction).partitionBy(new HashPartitioner(number of partitions)) val grouped = abc.groupByKey
+
+So, after map, the data was partitioned and given to all executors based on hash. To be precise, the RDD is partitioned and the result of map you get is also a RDD which is partitioned i.e. RDD is not single one but set of partitions. Now the group by is done on each node separately and parallel i.e. for each partition of RDD. So, there might be value present for particular key on 2 executors => to group them, shuffling needs to be done where this data will move to one executor to have all values for key grouped together.  
+Number of partitions: So, we will try to give number of partitions atleast same as number of cores to make full use of all the cores. Also, we will try to give partitions more than these but not very high number because, then, we will have a lot more shuffling. 
+ 
+
+Amazon EMR (Elastic Map Reduce) 
+1. To create a cluster with hadoop, spark, yarn pre installed in the cluster. 
+2. Pay by hour and only for memory, cores, network and storage IO.
+3. Sets up spark configuration already for you.
+4. It has utilities like aws already setup for using s3 etc.  
+BEST PRACTICES:     1. Clusters are really very expensive. For using it for a program, its better to run it locally and test your program using sampling of data. Terminating the cluster is very important on time.
+2. Make sure that the jar you are running on spark cluster, is compiled using same version of spark which your cluster has i.e. You have coded the program using particular spark version which should be same as cluster spark to be able to find those classes. So, cluster has particular spark version installed and if you try to run different version of spark jar, it wont work.   
+Troubleshooting     1. Spark UI
+2. Yarn logs on master => which it brings from the different nodes => yarn —application id
+3. Hardware capacity problem => issues like heartbeat missing, re-spinning up the executor, memory issues etc.
+4. Use partitioning => create smaller partitions so that executor can handle them. Executor might not be able to handle big partitions in one go with given resources. 
+ OTHERS 
+
+1. The tasks in spark are present like this in logs => Starting task 122.0 where 122 is the task number and 0 is the try number => the task is retried atleast 4 times before failing it completely.  
+Since, this problem will need lot of joins and aggregations, loading it as relational table will be better as joins are optimised there. As discussed, for relational table, we use dataframes and datasets.
+____________________________________________________________________________________________________________________________________________________________________________________
+QUESTIONS 
+
+Why do spark needs hadoop and a specific version of it ? 
+Difference between Hadoop and spark in details 
+Is spark on local desktop a simulation or is it actually running it by creating some cluster from our desktop itself 
+Are env variables set in mac OS also for spark => what is path of hadoop for mac 
+
+There was some book you showed to allen => https://buildmedia.readthedocs.org/media/pdf/scalding/readthedocs/scalding.pdf => this for scalding see if they have for spark also 
+
+Cluster and local mode of spark is there which you downloaded => how it works for local mode
+
+https://spark.apache.org/docs/2.3.0/index.html
+
+
+version wise changes in spark versions
+
+The spark core jar has all the classes needed => Is the spark non-standalone package and this spark-core jar different things or same things => I think it is different => find about it and write above  In spark context, we can tell it to run on local machine and the number of core max => * means to use all the cores on local machine and thus this might actually be running parallel on cores of local computer. => verify this => because if this is true => it contradicts that this is just simulation + it also contradicts you saying that running normal program vs spark for small dataset are not different in performance 
+
+Read about how sparkcontext works => does program gets distributed across nodes and and data too and Now, the code will run for that subset data => so each core has one sparkcontext => verify and then add to notes 
+
+Is the context of scala program and spark context different ? How are they related and how running program is different from running things with spark context 
+
+
+Find very good examples for big data to explain things 
+
+Understand MDA to see how spark sql is being used there 
+
+what happens when one node goes down in spark ? Does new node, takes the data from distrubuted storage like s3 again and start the process again ?
+
+what happens in hdfs if one data node goes down, how does it recover data for that node ?
+
+when you run refresh, the application tracking url is there => there is only one job or their are more than one applucation i.. what is application
+
+You change the ports inbound and outbound -> added some port yesterday => what are datanode ports ? Also, does every job uses HDFS and s3 only at end from hdfs 
+
+When I added some spark core dependency it wasn’t getting resolved => it was because it is tied to specific version of scala => changed scala version and it worked => So generally speaking also for scala, does it mean that any dependency only work with specific version of scala ? And why is that, idea just should download the mentioned dependency and later in compilation it should fail => Does it mean that, while resolving it looks for library in specific sclaa version on maven and maven has folder for each sclala version having these libraries => find out how it works ?
+
+
+https://spoddutur.github.io/spark-notes/
+
+How can spark automatically forward the precomputed data to executor whenever they need it ? 
+
+
+So, we were caching up the movies and their similarities, assuming that we can reuse it for the multiple queries => but does this mean, we will keep the cluster running or what ? And the main program which is taking the arguments, will that run on the master node and the RDDs => will they run on the particular nodes or it will be on the master => how is this thing working out 
+
+Answer somewhat => when you run the spark program by passing in the class argument => that is what main will receive and run it 
+=> 
+
+How do you tell spark that it has to use yarn and not the inbuilt spark cluster manager 
+
+See what all permissions the cluster needs to have to be able to access the s3 => inbound and outbound rules maybe 
+
+why do we need a distributed file system for spark => so that it can scale but why ? and if scaling is not a thing for our problem statement, can we use the local hard drive 
+
+what is special about master node. What does it have, which is not there in other nodes and why we only run spark submit on master node. Does it have the yarn and not the others or what ? 
+
+Does dependencies that we have in our scala project also packaged. If not, how are they found when running the spark program or do we have to specify those dependencies using —jars 
+
+He said we can copy the jar file we want to run on the master node and run the spark submit command => in this case, how does the spark works of distributing the jar files to the nodes. I mean where when and how this process of distributing this jar by either downloading of jar from s3 by nodes or copying of jar from master local to other nodes happens 
+
+
+Spark particular version is always tied to a particular version of scala 
+
+Verify your understanding of the distributing work of spark submit and also gain more knowledge around it 
+
+what type of clusters can we bring up i.e. can we bring up just the hadoop cluster with spark or just spark cluster and how do these differentiate actually 
+
+Read this :   https://docs.qubole.com/en/latest/user-guide/engines/spark/defaults-executors.html and also quobole other documentation 
+https://stackoverflow.com/questions/26562033/how-to-set-apache-spark-executor-memory 
+
+Create AWS account and EC2 key pair and download the .pem file => understand what is pem file used for and how these permissions and all i.e. devops part of it works  
+Does spark supports back versions i.e. will a cluster having spark 2.4.4 be able to run the program written using classes of the spark 2.3.3 i.e. program compiled using spark 2..3.3
+
+ask raja how he is baking the AMI for the spark 
+
+why too much partitions can be bad ? How is partinioning serving a optimisation in shuffling => how and when the shuffling happens ?
+
+How are the stages made in spark, see some example for it 
+
+why does spark not break these groupbykey type stages into tasks and distribute it ? what can be the issue in it doing it itself 
+
+If we don’t mention partitioning => it will run on just one master node and if data is big, shouldnt it go memory exceeded while doing operation like group by or join 
+
+How is mentioning partitions for one operation in driver script like for groupbyKey different from mentioning number of partitions in spark submit command like we have in some refresh job
+
+Why will there be more shuffling if the partitions are increased too much i.e. wouldn’t shuffling be function of number of executors and not the number of partitions 
+
+In terms of hardware, how is using 360 nodes for small map job which will finish much faster versus running 2 nodes for long time ? 
+
+Consider a case where we are grouping by key and there is only one key => partitioning might be a bad option in such a case righ ?
+
+What are other examples like above in which we can make decisions on partitioning based on the type of data 
+
+In partitioning video, he explained about some optimisation. There are questions on this part too in the course => find a good answer, understand it and put it in the notes of partitioning 
+
+Learn about all the different UIs that we have available like spark UI 
+
+So, if we are using 40 nodes and versus we are using 360 nodes =>  can in the case of less nodes, we see issue like less capacity in terms of memory => in this case how will we know the error => do we need to see particular container logs or it will show up in the front logs 
+
+yarn logs are huge, how to see trail version of it to see the errors 
+
+read more about spark session and also how it is used in the testing of the spark

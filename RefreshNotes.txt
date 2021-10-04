@@ -1,0 +1,239 @@
+REFRESH  
+=> in cluster mode, driver can be on any machine => So, yarn reserves one container for application master => If cluster mode, then driver runs on this same container 
+
+JOBS EXPLANATION  
+Data optimisations => null related    1. There are pail consolidate jobs which are responsible for consolidating the crawled data into bigger files. Because too many files, means too many s3 hits and other associated problems.
+2. Currently, in refresh, datapipeline cluster is inhouse cluster and carol is based on EMR. The cost of EMR as service is also there and hence we have carol more costly. Also, for note, master in datapipline is OD(on demand) and all the slaves are spot instances.
+3. Merge mapping job does the merging of the new crawled data i.e. consolidation job data and the snapshot of data of last refresh. We store both the snapshot and the timestamp when it was taken in s3. The job has 2 main parameters => MERGE_WHITELIST filters the whitelisted websites and MERGE_NO_OLDER_THAN takes data for particular days only. Also, after the IN and REST merge, the crawled data is in weekly folders. We have added both IN and REST snapshots at same location and merge job is reading the timestamp minimum of IN and rest timestamp. Also, the pipelines like attribute standarization and others are somewhat different for IN but now since IN is not needed because samsung is gone, we are using REST. (the IN kosmos is also not used which used to have different catalog compared to samsung)
+4. The pipeline stop cluster actually terminates the master, deletes its tags etc and also deletes the ASG group.
+5. The gocd janitor job preserves the last 10 runs of any pipeline and deletes everything else. The job is present in the shuriken repo: https://github.com/ind9/shuriken/blob/master/configs-gocd/data-pipeline.janitor.conf
+6. validate-products-on-stats in masterview stage is responsible for comparing the dataset size of current refresh and last refresh and see if it is above some threshold.
+7. publish dataset is responsible for publishing some of the intermediate datasets like output brand data to MDA as a dataset.
+8. cleanup pipeline in every stage in responsible for deleting all the intermediate datasets. So, other than brand data output, CE data etc are created, only the ones required in next stage are kept and others are deleted by cleanup. So, if you want to check anything related to intermediate data after the refresh is over, you should remove that data for cleanup in cleanup pipeline: https://github.com/ind9/datapipeline-ops/blob/master/bin/clean-up/delete-intermediate-paths.sh
+9. India and rest data is still crawled separately but path of both added to marge snapshot of previous snapshot.
+10. There are 3 pipeline dependencies on masterview i.e. these pipelines artifacts are given to masterview as child => Fetch artifacts for build, fetch artifacts for catalog, and fetch artifact for new export. See masterview stage materials and you will find these pipelines and also see parameters foe masterview to find PARENT_ENV_PATH which is used by task in masterview’s setup job’s task to copy the artifact from above 3 dependency pipelines.
+11. The enrichment job takes the CE pipeline data and enriches it i.e. fills the value of some of fields like UPC, etc which it gets from some deductions and other sources.
+12. Usually you can find the project to which jar belongs in the gocd logs somewhere Ex- datapipeline-jobs.jar is a bluesteak project in github of indix.
+13. In refresh hadoop jobs, we can use the map reduce UI which is available even after the job is completed and in case of spark jobs, since data pipeline cluster does not support spark UI, after spark job is completed spark UI is not available. It is only available when the job is running. Thus, we are not able to see the container logs for the spark in datapipeline cluster. We are only able to see the driver (the master) logs because most of the spark jobs run in client mode and thus driver logs are available on gocd even when job has finished by failing or etc. So, to make container logs also available after job has finished, we should setup spark history server on the data pipeline cluster too. 
+14. On the datapipeline cluster, the spark setting for history server are already there, you just need to login and start the history server.
+15. Some of the artifacts that are required from indix artifactory by the different project builds are mostly cached inside gocd box and rarely gets fetched from the artifactory.
+16. The start cluster in the masterview and the start cluster in yarn deploy master pipeline are same. 
+17. The datapipeline cluster url is only available when the cluster is up. 
+18. On AWS, we have a user script which is tied as bootstrap script script for every slave. This script also downloads the provisioning scripts for slaves (master and slaves has different provisioning scripts in zen repo) and setups the node manager etc on slaves. (See Case based issue 5) 
+19. We can check the management section of AWS S3 for seeing the purge policy. 
+20. This is used to provision master and slave respectively : https://github.com/ind9/zen/blob/master/systems/datapipeline-rest/playbooks/datapipeline-rest_aws_push.yml and https://github.com/ind9/zen/blob/master/systems/datapipeline-rest/playbooks/datapipeline-rest_aws_pull.yml AND this is used to terminate: https://github.com/ind9/zen/blob/master/systems/datapipeline-rest/playbooks/datapipeline-rest_aws_terminate.yml Also the push is used for yarn master deployment and its entry in DNS. Also it set ups the slave autoscaling group and bootstrap script for slave.
+21. We are using HDFS only for jar distribution. For others, we either use local disk space which is not distributed or if file is required by all the nodes, we store it in the s3.
+
+
+SOME IMP CHECKS AND POINTS
+
+1. Whenever you cancel a spark job by cancelling from the gocd, the job actually does not cancels. You have to go to the cluster and kill the application using yarn kill command. It might happen that, you retriggered the job and now 2 copies of same job are running which might corrupt the data which happened once.
+2. Let say there was some issue in the job and you took 10 minutes something to solve it => when you retrigger the job, make sure that all the nodes you have set as desired in Autoscaling group of AWS has come up. This is because, if all of them are not up, spark job once started will work only few of total nodes which were up when running it. Rest of the nodes which came up later wont be used by spark and are idle and wasting the cost for us.
+3. In some job in between, we can compare the data of this job with its previous run if they are comparable. Tells that its working fine.
+4. Before every refresh, we need to check that fetch artifact pipelines (3) have fetched the artifacts properly because artifact might be purged and these fetch pipeline might not be thus able to get them from s3 but still they won’t throw error for it. So, to solve this, we need to go to respective pipeline like bluesteak jobs which will generate the purged artifact like datapipelinejobs.jar and then we can re-trigger these fetch pipelines.
+5. The cluster scales up automatically when the job is submitted. This usually can take upto 15 minutes before it start the process of upscaling. This is because vamana can take this much time. 
+6. In client mode, since driver program is running on client side like gocd, yarn does not have the knowledge of the spark or hadoop job. On yarn page, if it shows as Succed, hadoop job still might be running. 
+7.   
+SOME COMMON ACTIONS
+
+INCREASING NODES WHEN CLUSTER IS RUNNING   2 changes => 1) Get into the cluster and change the nodes to 170 in vamana conf: /apps/vamana/conf  2) In AWS autoscaling group, change the max and desired nodes to the number of nodes you want. 3) Also, for it to pick the changes next time, make the change in zen repo for the number of nodes.  
+ CHANGING THE AVAILABILITY ZONE  1) Login to cluster and backup the masterview/product refresh folder whichever stage is going on. We can also run the setup pipeline of that stage instead but better to do below since if you are in middle of stage, run setup, pause subsequent pipeline and then run pipeline you want to run. This below folder contains the code from github which came via gocd material and it doesn’t change throughout the stage.  
+	ssh -i ~/force/ops/ansible/keys/ansible.pem  ubuntu@datapipeline-rest-master.midgard.avalara.io
+	sudo su - hadoop
+	cd ~
+	tar -czvf refresh-rest.tar.gz masterview-production-rest
+	s4cmd put refresh-rest.tar.gz s3://indix-users/sachin/
+ 2) Terminate the cluster from pipeline => Datapipeline-Production-REST-Master-Deploy => It is possible that start job is not completed here => first run that so that terminate job is available to run and then run terminate. Also, it might be that start job is already runned but it was run from previous month => the start pipeline has picked the github zen having last month configurations, when you stop it, it might not terminate the cluster properly =>  Whatever might be the case, you have to run the start cluster even if its already runned. This will pick latest git material (it won’t create a copy or new cluster since same name cluster will be already present)and then only do terminate stage.  Verify by logging to cluster or in AWS that it has terminated.   3) All below changes will be picked when you start the cluster as these are cluster related settings and are taken from zen github directly by cluster provision scripts :
+Change subnet here => https://github.com/ind9/zen/blob/master/systems/datapipeline-rest/playbooks/group_vars/all
+Change spot pricing here=> https://github.com/ind9/zen/blob/master/systems/datapipeline-rest/infra/vars_files/aws/prod.yml
+Also other settings like how much memory for yarn, security group etc   4) Start the cluster from Datapipeline-Production-REST-Master-Deploy => All your new changes from above commit will be picked as cluster settings.
+ 5) Paste the backup in home directory  	ssh -i ~/force/ops/ansible/keys/ansible.pem  ubuntu@datapipeline-rest-master.midgard.avalara.io
+	sudo su - hadoop
+	cd ~ 	s4cmd get s3://indix-users/arunkoshi/refresh/product-refresh-rest.tgz
+	tar -xvzf product-refresh-rest.tgz
+ 6) Start the job back again.
+——————————————————————————————————————————————————————————————————————————————
+IMP COMMANDS
+
+RUNNING SCP => 
+scp -i /Users/indix/Desktop/ansible.pem /Users/indix/Desktop/scalding-assembly-1.0.0-SNAPSHOT ubuntu@datapipeline-in-master.stag.indix.tv:/tmp/
+ If you are doing scp between 2 AWS instances => you will need to copy ansible.pem or whatever key is needed from your local on one machine and then use scp command there  YARN => https://hadoop.apache.org/docs/r2.4.1/hadoop-yarn/hadoop-yarn-site/YarnCommands.html yarn application -list
+yarn application -kill application_1428487296152_25597
+yarn -status 
+yarn logs -applicationId <application ID>
+yarn logs -applicationId <application ID> -containerId ContainerId
+ SSH =>
+SSH to gocd => ssh -i devops.pem ec2-user@datapipeline-rest-master.midgard.avalara.io and sudo su - go
+
+HADOOP =>
+hadoop jar className and other options
+
+NORMAL ONES => 
+ssh-keygen -R => deletes the already known hosts.
+sudo chown -R hadoop:users => sets the user as hadoop for particular file
+
+CRONTAB => 
+crontab -l => lists all the cron jobs on the cluster with their commands => you might want to run the Vamana command now so we donthave to wait for its 15 mins next cycle to come for it to scale the cluster up to 160 nodes as we know it will need it. 
+
+crontab -e => to edit the cronjob => it will ask for the editor => choose any and then put # in front of command to comment it => don’t forget to remove it later 
+
+
+IMP LINKS  Data pipeline cluster nodes, how many containers each has and their system configuration => http://datapipeline-rest-master.midgard.avalara.io:8088/cluster/nodes
+ The configuration of the cluster => http://datapipeline-rest-master.midgard.avalara.io:8088/conf   Prometheus url for metrics => http://prometheus1.midgard.avalara.io:9090/graph?g0.range_input=1h&g0.expr=100%20-%20(avg%20without%20(instance%2C%20cpu)%20(irate(node_cpu_seconds_total%7Bmode%3D%22idle%22%2CName%3D%22datapipeline-rest-prod-spot-asg%22%7D%5B1m%5D))%20*%20100)&g0.tab=1 
+Spark jobs in refresh =>  https://avalara1-my.sharepoint.com/:x:/g/personal/harsh_agarwal_avalara_com/EckIGiK2hAtJhUoKu2aj-yMB6ZtGNt6jtBVv2MVFzYbBwQ?e=MfC2Wi
+
+YARN - http://datapipeline-rest-master.midgard.avalara.io:8088/cluster
+ HDFS - http://datapipeline-rest-master.midgard.avalara.io:50070/dfshealth.html#tab-datanode
+
+Checking spot pricing across regions => click pricing button inside Ec2, spot => https://console.aws.amazon.com/ec2sp/v2/home?region=us-east-1#/spot
+
+Checking current cost spends => => https://console.aws.amazon.com/cost-management/home?region=us-east-1#/custom?groupBy=None&hasBlended=false&hasAmortized=false&excludeDiscounts=true&excludeTaggedResources=false&excludeCategorizedResources=false&excludeForecast=false&timeRangeOption=Custom&granularity=Daily&reportName=&reportType=CostUsage&isTemplate=true&startDate=2020-05-01&endDate=2020-06-28&filter=%5B%7B%22dimension%22:%22RecordType%22,%22values%22:%5B%22Refund%22,%22Credit%22%5D,%22include%22:false,%22children%22:null%7D%5D&forecastTimeRangeOption=None&usageAs=usageQuantity&chartStyle=Group
+
+In this sheet, i had captured some timings when i moved from r3.2xlarge to r5d.2xlarge in March - https://docs.google.com/spreadsheets/d/1GcNSrbyC-3b7AKC60vyQ36PUqWSrMt_w3IXStY5Tpcc/edit?usp=sharing
+
+Spot requests if getting outage or not but contains history of only few hours - https://console.aws.amazon.com/ec2sp/v2/home?region=us-east-1#/spot 
+Pail jobs but i think they are migrated to carol now by new freshers : http://scp-ci.indix.tv:8080/go/tab/pipeline/history/hourly-pail-migrate-qubole
+
+Hadoop history server => http://datapipeline-rest-master.prod.indix.tv:19888/jobhistory
+
+Vamana conf => https://github.com/ind9/zen/blob/master/systems/datapipeline-rest/provision/vars_files/aws/prod.yml#L108
+
+Artifactory used in many projects => http://artifacts.midgard.avalara.io:8081/artifactory/libs-release/com/
+——————————————————————————————————————————————————————————————————————————————
+ISSUES => only For finding issue, open the ASG group, and the logs in the gocd. Searching for keys like Exception and err might tell you the error. But usually you need to go through all the logs. 
+COMMON ISSUES
+
+1. Yarn logs showing the s3 even logs directory getting purged and you created the folder so logs can start getting written. In some of stages, the paths also gets purged and in the gocd logs only you see that directory is not found and you just create that path for it to find.  
+2. If the job passes quick or fails quick, check the ASG nodes if they are all up or not. It is possible.
+3. If you are not able to login to the datapipeline cluster with error you don’t have permission => change the .pem file permission to 700. 
+4. If you are not able to login to cluster with error as unreconizable host => go to /Users/sachinaggarwal/.ssh/known_hosts => remove the entry of datapipeline cluster. This is because, IP of datapipeline cluster might have changed since last time you logged into it which might be in last refresh. But known hosts file has saved that last ip for this datapipeline name and trying to login to that IP. Also you can do ssh-keygen -R => deletes the already known hosts.
+5. In some jobs, there are delete steps which though passed but is not able to clear and we have to manually clear from S3 UI in those cases if subsequent job fails because of incomplete delete.  LOST CONNECTION WITH EXECUTORS : Possible reasons and solutions  a) Is the instance count in the Yarn UI and AWS ASG UI showing wobbly count of nodes ? This you will see almost instantly. If seeing after sometime, Does the Spot requests page in AWS EC2 UI shows spot request failures i.e. requests not getting fulfilled with any other statuses like  instance-capacity-oversubscribed etc ? If yes, maybe wait for sometime for nodes to again become and settle to 130 and then trigger or start the cluster in different AZ zone. Also, this issue in both ways you can notice only upto few hours after which you can’t know if there were spot outage or not.  b) Does the log point to Yarn killing the executors due to memory/disk issues: Example => Requesting driver to remove executor 109 for reason Container killed by YARN for exceeding memory limits. 8.0 GB of 8 GB physical memory used => In this case, executor was killed because out of memory => increase the memory config of the executor => though in most of refresh jobs, we have increased it, in some it is left => https://github.com/ind9/datapipeline-ops/commit/af745b2d7f3561ddfff9f1a47c55c9d8bfd59a8f => Usually on datapipeline page you can see available memory after assigning memory to executor or you can see that nodes have 8 cores and executor is taking 4 cores => 2 executors and memory we are giving it is way less even though node has much more available memory available for use.
+6. Sometimes there are issues with the ashwanth’s s3 plugin for gocd. It is not able to find the artifact’s latest version even though artifact is present. In such a case, you need to delete not the just the artifact but also the parent directory of the artifact and regenerate the artifact and then in gocd, use fetch artifact pipeline which will use the plugin to poll for the artifact latest version and fetch the artifact.
+7. Sometimes you are not able to run the pipeline, even if you click the run pipeline button. In this case, usually there are error in gocd and you should look at the errors tab on the top. Also if any other issue relating running the job or artifact, check the error tab once. 
+8. In some cases, to test that any non-big data job is working or not or what is the issue, you go into the gocd box and run it there. Also, for spark jobs, you do same on the cluster master sometimes.
+9. Sometimes there are issues with inbound and outbound rules of the security group we are using. The security group tells that anything using this particular security group can talk to these all machine IP which are there in our AWS. It usually happens that some devops activity is going on and some changes in these security groups are done because of compliance.
+10. Sometimes there are issues with versioning of pipelines. You might need to run the pipeline again so that latest changes are picked or it is possible that the previous label of this pipeline was tied to particular label of other pipeline and you wanted to tie this with latest version of that other pipeline and hence ran this.   
+
+CASE BASED ISSUES 
+1. So, merge mapping has a consolidation job which failed. We tried running it on the datapipeline cluster and datapipeline jar was not present. This was because maybe it was getting the jar from gocd since this was a cap command. So, from fetch artifacts from build pipeline, we took the s3 path of this artifact and used that to run this hadoop job.
+2. The cluster provisioning i.e. start was failing => checked and found that it was python version issue in ansible which is why ansible script to bring up the cluster was failing.
+3. It happened once that we were facing some issue and found that gocd jantor cleanup stage is not working and we fixed it.
+4. Once the merge mapping was failing. When we checked the container logs, we found that it was the memory issue. Since this job merges the crawled data and the last snapshot, we checked the snapshot size with its previous version and it was fine. Thus we checked the crawled data and compared it with its previous version and found that it is not consolidating because consolidation jobs were failing. Hence, we fixed consolidation and it worked fine. 
+5. So, we were seeing that there are 0 nodes on the yarn page and in AWS we were seeing 1 slave node and even more present. We went to this up slave machine and did sudo su hadoop but it wasn’t working. This meant that the hadoop user is not setup i.e. the provisioning script of slave didn’t ran properly. We went to check the system logs of AWS for this slave node and found that “setup tools which is installed on this machine is not compatible with python 2.7 version” . Actually, when you install ansible package in provision script, it has one python dependency setup tools. Ansible is installing the latest version of this setup tools for it which is not compatible with python 2.7 of this slave machine. So, to solve this we went to provision script and before ansible gets installed we added a installation of setup tools of its previous version. Thus, when it comes to install ansible, ansible will find setup tools already there and won’t install it and its latest version will never come up. This is the reason that node manager was not getting installed on slave and master was unable to contact with slaves and reported the nodes to be 0 which showed up on yarn page.
+6. See CB Issue 6 in the same notes folder.
+7.  
+——————————————————————————————————————————————————————————————————————————————
+HADOOP AND SPARK EXPLANATION
+ 
+We are not using HDFS as storage and using S3 in refresh because, we are using the spot nodes. If the spot node goes away, we will lose the part of data HDFS stored on this node. Inside the cluster, the tmp location is the hdfs location. If you paste anything here, it is available to all the nodes. If we need to use this hdfs file, we have to give path starting with hdfs like hdfs://tmp/abc.txt. Example for using hdfs based jar =>  /apps/hadoop/bin/hadoop jar /tmp/sachin.jar  com.twitter.scalding.Tool GoldenProducts --hdfs --input s3://indix-users/sachin/products.tsv --output /tmp/out.txt
+
+
+The driver is the script that you are running and the application master is the yarn concept, which is the master responsible for making tasks out of the driver and distributing them. The executors are again a yarn concept which is a logical unit consisting of cores, memory, etc which is responsible for executing the tasks given by the master.
+
+—————————
+Client mode submission => In this case, the driver script runs on the machine from which you are submitting the spark job like gocd machine or kubernetes machine and  app master and executors run on cluster with yarn.  Example: driver script running on gocd box. In this case, we can see the driver logs on the gocd only. In client mode, since driver program is running on client side like gocd, yarn does not have the knowledge of the spark or hadoop job. On yarn page, if it shows as Succed, hadoop job still might be running. 
+
+Cluster mode is the one in which the driver also runs on the cluster. In this case, the driver and application master becomes single unit. In this case, we don’t see driver logs on the gocd box. 
+In carol, we use cluster mode.
+
+In cluster, the master node is the one on which main things are running like => service for history server which is served as localhost UI, the yarn, and other APIs.
+
+———————————
+In scalding jobs like merge mapping, the each task is shown as a job on cluster page => this is because scalding treats the reduce tasks also as a separate job. 
+Also, in spark, if let say we have a 7 stages, it means that we are running 7 MR jobs. In each MR job/stage, it can have both map and reduce tasks. However, if the system has the resources, if a stage is not dependent on the previous output, it can run parallely. 
+——————————————————————————————————————————————————————————————————————————————
+MDA
+
+So, MDA has a runner class which is responsible for creating the MDA jar, adding specs, adding mda job details which we are running and the Main class of Mda => these are submitted to carol as spark job where MDA is the jar file => carol runs the MDA jobs like these that you run on MDA UI. 
+
+CAROL  So, we can see the logs of carol in kubernetes to see if there is any issue in spark submit i.e. if issue before application is submitted on cluster. 
+——————————————————————————————————————————————————————————————————————————————
+OPTIMISATIONS
+
+
+1. We have added a node exporter which is uploading the CPU, network, memory usage for all the cluster nodes => we can know when cluster is idle and do optimisations like below. 
+2. In lot of stages like secondary-merge-mapping we have copy from s3 taking place which takes 10-15 minutes during which datapipeline cluster is idle. We can have this copy as a map job which can run on data pipeline cluster only and thus it will take less time and use cluster only.
+3. In CE we are switching to carol and thus 15 minutes waste of datapipeline cluster until vamana descales it. Also, carol is anyway more costlier.
+4. We have lot of dummy stages in between which are using gocd related things and during these times cluster is idle => We can have a gocd pipeline structure restructured: One group of pipelines having only spark related jobs and that too unlike 4 stages of refresh we have currently but each job in these stages as separate pipeline to have better control and to avoid going to cluster to run some jobs like CE if they fails, one pipeline for controlling vamana also, one group of pipelines having gocd related pipelines i.e. dummy pipelines, stats and verification pipelines, pipeline in refresh which are doing gocd work.  Also, this datapipeline gocd box can be completely shut down when refresh completes because gocd instance also charging money. So, we can have 2 partitions here: root and data. Data partition will be backed up as EBS volume and used again to bring back gocd box. This data volume will contain things like gocd server histories and its data, all artifacts needed by refresh so that refresh not fetch them from s3 and adds up to cost. We can save fetch artifacts from build pipeline artifacts in gocd server itself because most of them are static, not changing because no development. That way since minimal gocd work, we can just have one gocd agent instead of multiple gocd agent machines. 
+5. We will be using spot fleet instead of spot instances where we buy a group of spot and thus outage wont be that much of the issue.
+6. Using metrics from node exporter to find different instance type, different number of nodes for each pipeline based on resource usage from metrics captured in prometheus. Since we will know CPU usage, network usage and memory usage of each spark job, we can choose different instance type i.e. if spark job uses a lot of network for s3 connections but don’t use memory and CPU at all, we can have network intensive instance type which has very low memory and CPU and similarly for other resources we can. decide. 
+7. We can have proper group tags. For each pipeline, we can have different group tag and we can know costs for each spark job too in prometheus to pick for spark implementation optimizations.  OTHER:  1. MERGE mapping job has last task which is not used => we have to remove it. 
+
+
+OTHERS
+——————————————————————————————————————————————————————————————————————————————— INSTANCE TYPES IN AWS
+
+The instance type that are present in AWS has names like r5d.large etc has special meaning in the name in terms of resources it is providing to us => 
+
+r, m, c => ram and memory optimized, cpu optimised respectively => we have lot of these instance types => a for arm under general purpose, compute optimised, memory optimsed, gpu optimised, etc => https://aws.amazon.com/ec2/instance-types/
+
+3,4,5 =>  generations => better max CPU, memory etc avilable, processor frequency is better as go above the ladder
+
+d => disk optimised 
+n => network optimised 
+
+xlarge and all => large means 2 cores => 24xlarge means => 24*2*2 = 96 cores 
+
+
+VAMANA
+The Vamana upscales the nodes when the job starts, if no job is running, it downscales to 1 node 
+
+AMI
+
+The AMIs can be baked for anything and machine can be brought with those. So, classification service has AMI which is used in carol for classification ib and prediction job. Similarly we are planning to have spark, node exporter for metrics and others as AMI for refresh. It makes the setup of machines which needs to be done very frequently much easier.  Also, while we were creating an AMI for classification guys, instead of base as quobole, we changed the base as carol on top of which AMI is baked.   These AMIs you can see on the AMI page of the AWS. Also, on instances page of AWS, you can check for any instance, what base AMI it is using. Some instances are baked with AWS’s own AMI and sometimes we give ours. Also, some AMIs can run on particular instance types, they can’t run on every instance type. For example: We were trying to run AMI on t2micro instance which it wasn’t running because of how mount points are there for instance. Similarly the M5 instances were not working because they have nitro hardware in which the mount points are not  
+SPOT REQUESTS AND FLEET  If the spot requests over your bid price has exceeded the capacity of AWS, your instance will be terminated with message: instance-terminated-capacity-oversubscribed
+
+CAP AND NON CAP COMMANDS 
+So, usually the material in the gocd box is copied from the github and then inside, it uses it to run the scripts or whatever. So, if you make the change in the github while job is running on gocd, it wont be reflected.
+
+But if it is a cap command, the scripts are actually running on the cluster master and thus if let say first task is going on, we can make the change in second task code in github clone of our repo that is present on the cluster.
+——————————————————————————————————————————————————————
+QUESTIONS FOR KOSHI
+
+what dummy stages in between is raja talking about 
+
+Ask koshi what is container => is it same as executor 
+Also in case of spot instances => if the spot instance goes away, that work is rescheduled on another node or yarn waits for its replacement spot to come up and also when does it exactly fails in case of spot outage => trying to connect 
+Or is it that if even one node goes down => since not able to connect, it fails the job => then what part of fault tolderance is yarn handling 
+
+Also, understand from raja, how he integrated the node exporter and learn more about the prometheus 
+
+So, merge mapping has a consolidation job which failed. We tried running it on the datapipeline cluster and datapipeline jar was not present. This was because maybe it was getting the jar from gocd since this was a cap command. => verify this 
+
+Disk space was less => nodes changed to 170 => why can’t this enrichment job finish in less nodes => is data that big that it can’t fit in 170 nodes ?
+
+Spark when job fails midway => how can we start the job back from the same point 
+
+We don’t have reduceBy for the datasets ?? Why 
+
+So, when we start the cluster and submit the first spark job, does the spark job waits for all the nodes to come up ? If yes, in other cases when we cancel the job and vamana descales, we wait for the nodes to come up but not when we start the cluster and submit the spark job => so how is it working 
+
+does hadoop jobs in refresh shows containers and spark jobs shows us executors 
+
+ instance-capacity-oversubscribed => in spot => spot outage and this are different things right 
+
+write more about https://stackoverflow.com/questions/49988475/why-increase-spark-yarn-executor-memoryoverhead?noredirect=1&lq=1 => In common issues section after reading later on what is overhead and all   Is it possible that task was recheduled that’s why ? Caused by: org.apache.parquet.io.ParquetEncodingException: UTF-8 not supported and showing parquet file already exists after that => also sometimes I see that the task is failed but I still see that the job has passed 
+
+why are we not doing changes in merge snapshot and timestamp that we used to do earlier 
+
+Cluster mode =>  In this case, the driver and application master becomes single unit. Read more about this 
+
+when we submit the job from gocd in client mode, how is gocd machine able to run spark submit since it does not have spark 
+
+What if we terminate the gocd job => what happens in above 2 modes respectively ?
+
+read more about cap and non cap commands and also some things in these notes are not complete and might need more reading => so read this whole thing again.
+
+can we see driver logs on cluster in case of cluster mode 
+
+point 14 ?
+
+read kartik IB generation post 
+
+what does application means 
+
+Are we using HDFS or not => for distributing the jars, we say we use HDFS but you said not using HDFS at all 
+
+1. In client mode, since driver program is running on client side like gocd, yarn does not have the knowledge of the spark or hadoop job. On yarn page, if it shows as Succed, hadoop job still might be running. => read more => Yarn page => always show success => driver running through cap on master => even if it fails 
+2. => spark page will show it  => check which one it is and update accordingly 
+
